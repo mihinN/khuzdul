@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# assembler outputs
+*.bin
+*.obj
+*.o
+*.lst
+
+# virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp

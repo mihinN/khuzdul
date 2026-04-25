@@ -1,0 +1,357 @@
+- Instruction Encoding Format
+	* 32bit 64bit
+		** EAX vs RAX prefixes
+	* vector/array instructions
+		** VEX and EVEX prefixes
+	* Legacy Prefixes
+		** LOCK
+		** REP
+		** REPE
+
+- Opcode
+	* primary Opcode can be 1,2 or 3 byte long
+	* some instructions use a 3bit field within the ModR/M byte as an opcode
+	Extention
+- ModR/M Byte if an instruction referes to an operand in memory , you must encode this byte
+	* It contains a mod field and an r/m field (which combine to specify registers
+	or addressing modes) and a reg/opcode field
+- SIB Byte (Scale Index Base): Certain ModR/M encodings requires this second addressing byte to
+	define 32bit or 64bit plus index and scale plus index addressing
+- Displacement and Immediate Bytes: Static Offsets(Displacements)  or static data values
+(immediates) must be encoded at the very end of the instruction format, typically in 1, 2 or
+4bytes sizes.
+
+- Memory Addressing Modes
+    * Legacy Addressing Formats
+    * 64bit Addressing
+
+- Developer Ergonomics (Redundant Mnemonics)
+- Pseudo Operations (Pseudo Ops)
+- Vector length and Default sizes
+
+Instruction (Opcode + Operands) -> <parse_this> -> instruction encoding format
+
+Operands
+    * register
+    * memory address -> addressing modes
+
+- Alignment of Hot Code Path
+    * this means we have to align instruction , collections of  32bytes 256bits (in x86 AVX-512 heavy codes are collections of 64bytes - 512bits)
+
+    * this is important because think some branch instruction like loop, start 6bytes before the
+    the cache line boundry. that means we can get that whole branch data into that cache , and
+    cpu need to run two cycle to complete that one iteration. so we called this "Fetch Boundary Split"
+    * so we have to wait and , add NOP to complete those 6bytes and start fresh next instruction
+    start at multiple of 16
+
+    Example:
+        NOP              ; padding bytes added by assembler
+        NOP              ; to push loop start forward
+        ALIGN 16         ; next instruction starts at multiple of 16
+    loop_start:
+        add rax, rbx
+        dec rcx
+        jnz loop_start
+
+- What Assembler should do ?
+    * For your x86-64 assembler specifically, this means supporting an ALIGN directive that emits NOP padding bytes:
+    Code :
+    ALIGN 16    ; emits 0–15 NOP bytes to reach next 16-byte boundary
+    ALIGN 32    ; emits 0–31 NOP bytes to reach next 32-byte boundary
+- This is like converting into Chunks
+
+    chunk 0:  [00–0F]  ← one fetch unit
+    chunk 1:  [10–1F]  ← one fetch unit
+    chunk 2:  [20–2F]  ← one fetch unit
+    chunk 3:  [30–3F]  ← one fetch unit
+
+- Instruction Encoded
+legacy pfx
+REX
+opcode
+ModRM : Which Register and Memory Involved
+SIB : How to calculate Address
+disp
+immediate
+    * SIB appears when the address is too complex , ModRM alone to describe
+    * ModRM can handle simple addresses like this :
+    MOV eax, [rbx]        ; easy, just a register
+    MOV eax, [rbx + 8]    ; easy, register + offset
+    But when the Addresses like this :
+    MOV eax, [rbx + rsi*4 + 8]
+    we need SIB,
+    * ModRM only has 3 bits for the address — not enough to encode two registers + a scale factor. So it basically raises its hand and says:
+    "hey, this address is too complex for me, check the SIB byte"
+
+
+assembler/
+├── assembler/              # Main package
+│   ├── __init__.py
+│   ├── lexer.py            # Tokenizer / scanner
+│   ├── parser.py           # Parses tokens into AST or instruction list
+│   ├── encoder.py          # Encodes instructions to binary/hex
+│   ├── symbol_table.py     # Manages labels and symbols
+│   ├── error.py            # Custom exceptions & error reporting
+│   └── utils.py            # Shared helpers
+│
+├── isa/                    # Instruction Set Architecture definitions
+│   ├── instructions.py     # Opcode table, mnemonics, operand types
+│   └── registers.py        # Register names and encodings
+│
+├── tests/                  # Unit and integration tests
+│   ├── test_lexer.py
+│   ├── test_parser.py
+│   ├── test_encoder.py
+│   └── samples/            # Sample .asm source files for testing
+│       ├── hello.asm
+│       └── loop.asm
+│
+├── cli.py                  # Entry point: argument parsing, file I/O
+├── pyproject.toml          # Project metadata and dependencies
+└── README.md
+
+
+- Listing most important instrctuins , intelAMD
+
+
+- Starting with Flat binary -> ELF -> PE/COFF
+
+- Purpose of this project
+    * When we have to exploit binaries, there are few defensive mechanism used by the operating system,
+    kernel level and the instructions lvl.
+    like Address randomization, stack canaries, control flow intergrity, RELRO, NX. this is commonly use for
+    attacks like ROP(return oriented programming)
+
+- checking attack surfaces
+
+- What about Linkers that used in Nvidia , TPU, NPU, different type of systolic arrays and asics and gpus, How linkers
+use in Inference Chips like AWS Inferentia, Groq , Models use in Trainium like Custom made ASICs
+-
+
+- How I test my encoded Binaries with actual binaries
+    * test against NASM
+    * use LLVM MC test corpus
+    * Round-trip: assemble → disassemble with objdump → verify
+
+- first part , Encoding the core instruction set
+    * How to encode every addressing mode (register, memory, immediate, RIP-relative)
+    * ModRM byte calculation for all mod/reg/rm combinations
+    * SIB byte calculation for [base + index*scale + disp]
+    * When to emit REX prefix and which bits to set
+    * Opcode tables — knowing which opcode byte maps to which instruction + operand combo
+
+- second part : Assembly language Syntax parsing
+    * Tokenizing
+    * Parsing
+    * Expression evaluator , handling label + Offset
+
+0x42
+16^0*2 + 16^1*4
+1 + 64 = 66
+2 * 2 * 2 * 2 *
+16^0*8 = 8 in decimal
+
+- How ModRM works ?
+    * ModRM use because , opcode byte alone cant encode all combinations.
+    * there arent enough bits to do that
+    * so ModRM second byte that carris this information
+
+    Example:
+    Opcode byte -> mov, add , sub (this along cant encode)
+    ModRM byte -> where to do it (which registers memory or not)
+
+    * ModRM exists because of, cpu needs to know which registers are
+    involved and whether to treat them as value or memory address
+
+- test against NASM
+- test with capstone
+
+- Operand
+
+- Lexer Logic
+get_raw_code -> tokenize
+tokens -> symbols (memory addressing to arithmatic) , instructions (registers + opcodes + labels )
+
+programming -> giving instructions to microprocessor in hight lvl language -> compiler optimizr tht to low level
+as a programmer we should write data structures and algos
+not instructions -> manipulating those instructions
+memory management + algorithm
+effective -> problem solve
+but , effective methods is not working on hardware
+hardware -> fetch decode execute -> lenear instructions
+parallel processing , parallely fetch decode execute rw mem access
+pipelined architecture
+speculative execution
+branch prediction
+turing completeness -> solving any problem improving computation power
+p vs np problem
+
+if we build hardware/computation device
+always need software layer / drivers / kernel , os
+so software layer is the important thing
+if you tapeout a sillicon chip, that was great, but building
+good software stack is hard. think evolution of current general purpose computer , device drivers , os , network stacks
+in AI, problem is the slop , if it trained with garbage data , you get garbage output
+if model improves quickly as possible , slop will degrade
+
+what actually you need to know ?
+problem solving.
+problem solving is not enought , because you have to use microprocessor
+that means yu have to use ISA, thats how we give instructions to processor
+
+give instructions to how to solve problem
+creatively use those instructions
+creatively manipulate binaries
+math is not enought , how we actually execute math on hardware
+you should have to become a builder
+solving problems -> use best algos -> best data structures -> build something
+prototyping is needed (here AI helps most)
+
+computer the nature
+what we need to learn :
+solving problems + how actually communicate with hardware
+in future hardware engineers write applications with AI ,
+optimize software
+
+Current Education system should be change , we need to go back to 19
+era and think like those engineers.
+
+How data is actually represented and moves
+Logic and discrete mathematics — real logic, not surface level
+Computer architecture — what the machine is genuinely doing
+Algorithms as thinking tools, not interview tricks
+Systems thinking — how components interact, fail, and get exploited
+
+again , what actually needds ?
+* Understanding problems deeply enough to direct computation toward solving them.
+* How data is represented — bits, memory, state
+* Logic — real boolean reasoning, not just if/else
+* Computer architecture — what actually happens when code runs
+* Algorithms as thinking patterns, not memorized solutions
+* Networks — how data actually moves between systems
+
+new skills
+Decomposing a complex problem into precise instructions
+Knowing what to ask AI and what to verify
+Understanding why a solution works, not just that it works
+Recognizing when AI output is subtly wrong
+(Improving Engineering Judgement)
+
+Mathematics — real mathematics
+* Probability and statistics — understanding uncertainty
+* Discrete math — logic, graphs, combinatorics
+* Linear algebra — how data transforms
+* Information theory — what data actually is
+
+Understand the problem deeply
+Model it correctly
+Direct computation — AI or otherwise — to solve it
+Verify the solution is actually correct and safe
+Understand what can go wrong
+
+
+OK, now we should Lexer , backto normal
+=======================================
+- LLM Tokenizers are most of the time , probability based 
+- first step always based on finite state machine (fsm), scanner 
+    * reads the RAW input string and segment it into lexmes 
+    * then categorize those lexmies into token classes
+- Evaluator (lexme)
+    * Takes those categorized lexemes and converts them into processed values
+    * Essentially answers: "What is the actual meaning/value of this chunk?"
+
+as an example : x = 5 
+* scanner : indentifies x, = and 5 in seperate lexmes , and label them as identifier , 
+operator and number 
+* Evaluator : Convert them to Actual Usable values, 5 becomes the integer 5 
+
+Adding shellcode engine 
+=======================
+- shellcode is basically we injecting instructions / binaries with opcodes to memory 
+- then memory executes that/ normal processor behaviour is fetch / decode and Execute 
+- but current os have deffensive techniques like : ASLR , stack canaries , Control flow intergrity 
+    safe stack/shadow stck
+- how to bypass this ? 
+    * basically defeating all defensive techiniques 
+    * Fileless malware 
+    * JIT sparying in browser 
+    * if have have ring 0 access we can disabled all 
+    * EDR analyse all patterns // we need patience in here
+
+- How Microcode update happends via interent 
+    * i remember this process in early days fully. not now 
+    * how ever this loads on ROM
+    * Currently microcode updates are cryptographically signed by Intel/AMD. You need their private key to load custom microcode on production silicon.
+    * check more about "eFuse"
+
+
+eFuse region contains:
+├── Public key hash (for microcode signature verification)
+├── Decryption key (for encrypted microcode)
+├── Secure Boot keys
+├── Device unique ID
+├── Feature enable/disable bits (artificial product differentiation)
+└── Security version numbers (prevent rollback to old vulnerable microcode)
+
+You were thinking:
+    key in ROM → encrypted → hardware decrypts
+
+Reality is very close:
+    public key hash burned in eFuses (permanent, hardware)
+         ↓
+    microcode arrives encrypted + signed
+         ↓
+    hardware verification engine checks signature
+    (dedicated circuit, key never exposed)
+         ↓
+    hardware decryption engine decrypts microcode
+    (dedicated circuit, key never exposed)
+         ↓
+    microcode loaded into microcode RAM
+         ↓
+    CPU executes it
+
+
+   (when doing shellcode engine , i just dig deep into rabbithole and find those) 
+
+   
+Objective is: 
+- writing lexer / just research about lexer area 
+- when this is completed , writing shellcode engine 
+- Polymorphic Engine 
+- Instruction substitution 
+    - encode same operation 
+    - useful for IDS evasion 
+- ROP gadget output mode 
+    - find gadget in the binary 
+    - output usable ROP chain 
+
+What are shellcode friendly features? 
+    - Position Independent Code
+    - Encoding variant Awareness 
+    - Byte level Constraints 
+
+Instruction substitution Engine 
+Register renaming system 
+Junk and Noise Injection 
+Polymorphic Encoder
+Control Flow Mutation 
+ROP Gadget Mode 
+
+- isa layer works as Lookup / encoding spec 
+- Instructions knowledge and Instruction Instances are two different things
+
+we need to add IR layer : 
+    - in memory representation of your program before it becomes bytes
+
+source -> lexer / parser -> IR -> encoder -> machine_code 
+in IR layer we manipulate instructions like this : Instruction("MOV", [Reg("EAX"), Imm(5)])
+- IR = a simulation layer of instructions with meaning, but without execution
+
+building 
+01: Lexer 
+02: Parser then moves to IR layer 
+03: Encoder 
+04: Transformation layer 
+
+
