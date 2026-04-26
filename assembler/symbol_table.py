@@ -31,10 +31,10 @@ class Symbol:
     def __init__(
         self,
         name:      str,
-        offset:    int  = 0,
-        is_global: bool = False,
-        is_extern: bool = False,
-        is_local:  bool = False,
+        offset:    int  = 0,        # byte offset in output
+        is_global: bool = False,    # exported via GLOBAL directive
+        is_extern: bool = False,    # imported via EXTERN directive
+        is_local:  bool = False,    # starts with "."
         line:      int  = 0,
     ):
         self.name      = name
@@ -57,6 +57,9 @@ class Symbol:
 
 
 # **** Estimator ****
+# rough byte size estimator for pass 1
+# encoder fills exact sizes in pass 2
+# this is good enough for offset calculation
 
 def _estimate_instruction_size(instr: IRInstructions) -> int:
     """
@@ -103,13 +106,13 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
     ):
         return 6
 
-    # SYSCALL — always 2 bytes (0F 05)   ← fix 1
-    if mnemonic == "SYSCALL":
-        return 2
-
     # PUSH / POP reg
     if mnemonic in ("PUSH", "POP") and OperandType.REGISTER in types:
         return 1 + rex
+
+    # SYSCALL — always 2 bytes (0F 05)   ← fix 1
+    if mnemonic == "SYSCALL":
+        return 2
 
     # reg + reg
     if types == [OperandType.REGISTER, OperandType.REGISTER]:
@@ -122,7 +125,7 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
             return 3 + rex
         if imm_size == OperandSize.WORD:
             return 4 + rex
-        return 6 + rex
+        return 6 + rex      # DWORD / QWORD immediate
 
     # reg + mem  or  mem + reg
     if OperandType.MEMORY in types:
@@ -131,10 +134,10 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
         if op_m.disp != 0:
             base += 4 if abs(op_m.disp) > 127 else 1
         if op_m.index is not None:
-            base += 1
+            base += 1       # SIB byte
         return base
 
-    # label ref
+    # label ref (JMP/CALL handled above, this catches PUSH label etc.)
     if OperandType.LABEL_REF in types:
         return 5 + rex
 
@@ -144,11 +147,9 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
 
 def _estimate_data_size(node: IRData) -> int:
     """
-    calculate byte size of data definition
-
-    DB "hello"  ->  5 bytes   (string length)
-    DB 0x41     ->  1 byte    (one unit per value)
-    DD 42       ->  4 bytes   (one dword)
+    calculate exact byte size of data definition
+    DB "hello"  ->  5 bytes
+    DD 42       ->  4 bytes
     RESB 10     ->  10 bytes  (count * unit)   ← fix 2
     RESW 4      ->  8 bytes   (4 * 2)
     RESD 2      ->  8 bytes   (2 * 4)
@@ -177,10 +178,10 @@ def _estimate_data_size(node: IRData) -> int:
 # **** Symbol Table ****
 class SymbolTable:
     def __init__(self, base_address: int = 0):
-        self.base_address = base_address
-        self.symbols: dict[str, Symbol] = {}
-        self.globals: set[str]          = set()
-        self.externs: set[str]          = set()
+        self.base_address = base_address        # ORG value, default 0
+        self.symbols: dict[str, Symbol] = {}   # name -> Symbol
+        self.globals: set[str]          = set() # names exported globally
+        self.externs: set[str]          = set() # names imported externally
 
     # ── public ────────────────────────────────────────────
 
@@ -249,7 +250,7 @@ class SymbolTable:
                     line     = node.line,
                 )
                 self.symbols[name] = sym
-                # store offset in IRLabel for encoder convenience
+                # also store in IRLabel for encoder convenience
                 node.offset = offset
 
             elif isinstance(node, IRInstructions):
@@ -266,7 +267,7 @@ class SymbolTable:
                     offset = node.args[0]
                     self.base_address = offset
 
-    # ── pass 2 : resolve globals, externs, label refs ─────
+    # ****  pass 2 : resolve globals, externs, label refs ****
 
     def _pass2_resolve(self, program: IRProgram) -> None:
         """
@@ -289,6 +290,7 @@ class SymbolTable:
                     for arg in node.args:
                         name = str(arg).upper()
                         self.externs.add(name)
+                        # extern symbols get offset 0 — linker fills them
                         if name not in self.symbols:
                             self.symbols[name] = Symbol(
                                 name      = name,
@@ -307,6 +309,7 @@ class SymbolTable:
                                 line = node.line,
                             )
                         if name in self.symbols:
+                            # store resolved offset back into operand
                             op.resolved_offset = self.symbols[name].offset
                         else:
                             op.resolved_offset = 0    # extern, linker resolves
