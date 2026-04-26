@@ -1,3 +1,8 @@
+# assembler/symbol_table.py
+# purpose : two pass symbol resolution
+# pass 1  : scan all labels , calculate byte offsets
+# pass 2  : resolve all label references in operands
+
 from assembler.ir import (
     IRProgram, IRInstructions, IRLabel, IRDirectives, IRData,
     Operand, OperandType, OperandSize,
@@ -26,10 +31,10 @@ class Symbol:
     def __init__(
         self,
         name:      str,
-        offset:    int  = 0,        # byte offset in output
-        is_global: bool = False,    # exported via GLOBAL directive
-        is_extern: bool = False,    # imported via EXTERN directive
-        is_local:  bool = False,    # starts with "." 
+        offset:    int  = 0,
+        is_global: bool = False,
+        is_extern: bool = False,
+        is_local:  bool = False,
         line:      int  = 0,
     ):
         self.name      = name
@@ -52,9 +57,6 @@ class Symbol:
 
 
 # **** Estimator ****
-# rough byte size estimator for pass 1
-# encoder fills exact sizes in pass 2
-# this is good enough for offset calculation
 
 def _estimate_instruction_size(instr: IRInstructions) -> int:
     """
@@ -101,13 +103,13 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
     ):
         return 6
 
+    # SYSCALL — always 2 bytes (0F 05)   ← fix 1
+    if mnemonic == "SYSCALL":
+        return 2
+
     # PUSH / POP reg
     if mnemonic in ("PUSH", "POP") and OperandType.REGISTER in types:
         return 1 + rex
-
-    # SYSCALL — 2 bytes
-    if mnemonic == "SYSCALL":
-        return 2
 
     # reg + reg
     if types == [OperandType.REGISTER, OperandType.REGISTER]:
@@ -120,7 +122,7 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
             return 3 + rex
         if imm_size == OperandSize.WORD:
             return 4 + rex
-        return 6 + rex      # DWORD / QWORD immediate
+        return 6 + rex
 
     # reg + mem  or  mem + reg
     if OperandType.MEMORY in types:
@@ -129,10 +131,10 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
         if op_m.disp != 0:
             base += 4 if abs(op_m.disp) > 127 else 1
         if op_m.index is not None:
-            base += 1       # SIB byte
+            base += 1
         return base
 
-    # label ref (JMP/CALL handled above, this catches PUSH label etc.)
+    # label ref
     if OperandType.LABEL_REF in types:
         return 5 + rex
 
@@ -142,10 +144,15 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
 
 def _estimate_data_size(node: IRData) -> int:
     """
-    calculate exact byte size of data definition
-    DB "hello"  ->  5 bytes
-    DD 42       ->  4 bytes
-    RESB 64     ->  64 bytes
+    calculate byte size of data definition
+
+    DB "hello"  ->  5 bytes   (string length)
+    DB 0x41     ->  1 byte    (one unit per value)
+    DD 42       ->  4 bytes   (one dword)
+    RESB 10     ->  10 bytes  (count * unit)   ← fix 2
+    RESW 4      ->  8 bytes   (4 * 2)
+    RESD 2      ->  8 bytes   (2 * 4)
+    RESQ 1      ->  8 bytes   (1 * 8)
     """
     size_bytes = {
         OperandSize.BYTE:  1,
@@ -153,24 +160,27 @@ def _estimate_data_size(node: IRData) -> int:
         OperandSize.DWORD: 4,
         OperandSize.QWORD: 8,
     }
-    unit = size_bytes.get(node.size, 1)
-
+    unit  = size_bytes.get(node.size, 1)
     total = 0
+
     for v in node.values:
         if isinstance(v, str):
-            total += len(v.encode("utf-8"))     # string length
+            total += len(v.encode("utf-8"))     # string byte length
         elif isinstance(v, int):
-            total += unit                        # one unit per integer
+            if node.is_reserve:
+                total += unit * v               # RESB 10 = 10 * 1 = 10
+            else:
+                total += unit                   # DB 0x41 = 1 byte
     return total
 
 
 # **** Symbol Table ****
 class SymbolTable:
     def __init__(self, base_address: int = 0):
-        self.base_address = base_address        # ORG value, default 0
-        self.symbols: dict[str, Symbol] = {}   # name -> Symbol
-        self.globals: set[str]          = set() # names exported globally
-        self.externs: set[str]          = set() # names imported externally
+        self.base_address = base_address
+        self.symbols: dict[str, Symbol] = {}
+        self.globals: set[str]          = set()
+        self.externs: set[str]          = set()
 
     # ── public ────────────────────────────────────────────
 
@@ -239,7 +249,7 @@ class SymbolTable:
                     line     = node.line,
                 )
                 self.symbols[name] = sym
-                # also store in IRLabel for encoder convenience
+                # store offset in IRLabel for encoder convenience
                 node.offset = offset
 
             elif isinstance(node, IRInstructions):
@@ -256,7 +266,7 @@ class SymbolTable:
                     offset = node.args[0]
                     self.base_address = offset
 
-    # ****  pass 2 : resolve globals, externs, label refs **** 
+    # ── pass 2 : resolve globals, externs, label refs ─────
 
     def _pass2_resolve(self, program: IRProgram) -> None:
         """
@@ -279,7 +289,6 @@ class SymbolTable:
                     for arg in node.args:
                         name = str(arg).upper()
                         self.externs.add(name)
-                        # extern symbols get offset 0 — linker fills them
                         if name not in self.symbols:
                             self.symbols[name] = Symbol(
                                 name      = name,
@@ -298,7 +307,6 @@ class SymbolTable:
                                 line = node.line,
                             )
                         if name in self.symbols:
-                            # store resolved offset back into operand
                             op.resolved_offset = self.symbols[name].offset
                         else:
                             op.resolved_offset = 0    # extern, linker resolves
@@ -307,4 +315,3 @@ class SymbolTable:
         for name in self.globals:
             if name in self.symbols:
                 self.symbols[name].is_global = True
-
