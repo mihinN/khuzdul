@@ -1,3 +1,8 @@
+# assembler/symbol_table.py
+# purpose : two pass symbol resolution
+# pass 1  : scan all labels , calculate byte offsets
+# pass 2  : resolve all label references in operands
+
 from assembler.ir import (
     IRProgram, IRInstructions, IRLabel, IRDirectives, IRData,
     Operand, OperandType, OperandSize,
@@ -29,7 +34,7 @@ class Symbol:
         offset:    int  = 0,        # byte offset in output
         is_global: bool = False,    # exported via GLOBAL directive
         is_extern: bool = False,    # imported via EXTERN directive
-        is_local:  bool = False,    # starts with "." 
+        is_local:  bool = False,    # starts with "."
         line:      int  = 0,
     ):
         self.name      = name
@@ -105,7 +110,7 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
     if mnemonic in ("PUSH", "POP") and OperandType.REGISTER in types:
         return 1 + rex
 
-    # SYSCALL — 2 bytes
+    # SYSCALL — always 2 bytes (0F 05)   ← fix 1
     if mnemonic == "SYSCALL":
         return 2
 
@@ -145,7 +150,10 @@ def _estimate_data_size(node: IRData) -> int:
     calculate exact byte size of data definition
     DB "hello"  ->  5 bytes
     DD 42       ->  4 bytes
-    RESB 64     ->  64 bytes
+    RESB 10     ->  10 bytes  (count * unit)   ← fix 2
+    RESW 4      ->  8 bytes   (4 * 2)
+    RESD 2      ->  8 bytes   (2 * 4)
+    RESQ 1      ->  8 bytes   (1 * 8)
     """
     size_bytes = {
         OperandSize.BYTE:  1,
@@ -153,14 +161,17 @@ def _estimate_data_size(node: IRData) -> int:
         OperandSize.DWORD: 4,
         OperandSize.QWORD: 8,
     }
-    unit = size_bytes.get(node.size, 1)
-
+    unit  = size_bytes.get(node.size, 1)
     total = 0
+
     for v in node.values:
         if isinstance(v, str):
-            total += len(v.encode("utf-8"))     # string length
+            total += len(v.encode("utf-8"))     # string byte length
         elif isinstance(v, int):
-            total += unit                        # one unit per integer
+            if node.is_reserve:
+                total += unit * v               # RESB 10 = 10 * 1 = 10
+            else:
+                total += unit                   # DB 0x41 = 1 byte
     return total
 
 
@@ -256,7 +267,7 @@ class SymbolTable:
                     offset = node.args[0]
                     self.base_address = offset
 
-    # ****  pass 2 : resolve globals, externs, label refs **** 
+    # ****  pass 2 : resolve globals, externs, label refs ****
 
     def _pass2_resolve(self, program: IRProgram) -> None:
         """
@@ -307,4 +318,3 @@ class SymbolTable:
         for name in self.globals:
             if name in self.symbols:
                 self.symbols[name].is_global = True
-
