@@ -351,7 +351,22 @@ in IR layer we manipulate instructions like this : Instruction("MOV", [Reg("EAX"
 building 
 01: Lexer 
 02: Parser then moves to IR layer 
-03: Encoder 
-04: Transformation layer 
+03: Symbol table
+04: Encoder 
+05: Transformation layer 
+
+
+if Shellcode is position independent code , we can load that 
+intpo any address. 
+in normal if we load into wrong one , it gets the segfaults and crash
+
+kernel loads at random address -> shellcode inject via bufferoverflow or something 
+-> shellcode address = unknown at writetime
+MUST be position independent code to work 
+
+- basically getting shell using trusted process by the Operating system 
+- changing protection bits
+
+
 
 
