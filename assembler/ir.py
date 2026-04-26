@@ -1,39 +1,36 @@
-# currently IR layer not nessary for the assembler (no we need this now)
-# but will important for the shellengine 
+# assembler/ir.py
+# purpose : adding noise to instructions , register renaming and position
+            # independent code
 
-# purpose : adding noise to instructions , register renaming and position 
-            # independent code 
+from isa.registers import Registers
+from isa.instructions import Instructions
 
-from isa.registers import Registers 
-from isa.instructions import Instructions 
-
-class OperandType: 
-    REGISTER = "REGISTER"
+class OperandType:
+    REGISTER  = "REGISTER"
     IMMEDIATE = "IMMEDIATE"
-    MEMORY = "MEMORY"
+    MEMORY    = "MEMORY"
     LABEL_REF = "LABEL_REF"
 
-class OperandSize: 
-    NONE = 0
-    BYTE = 8
-    WORD = 16 
-    DWORD = 32 
+class OperandSize:
+    NONE  = 0
+    BYTE  = 8
+    WORD  = 16
+    DWORD = 32
     QWORD = 64
 
-class EncodingPref:                          # ← fixed: was ENCODINGS
-    DEFAULT = "DEFAULT"
-    SHORTEST = "SHORTESTS"
+class EncodingPref:
+    DEFAULT    = "DEFAULT"
+    SHORTEST   = "SHORTESTS"
     AVOID_NULL = "AVOID_NULL"
-    FORCE_REX = "FORCE_REX" # emit rex if it not needed 
-    FORCE_VEX = "FORCE_VEX" # this replace old SSE bytes
+    FORCE_REX  = "FORCE_REX"
+    FORCE_VEX  = "FORCE_VEX"
 
 
 # **** ISA Table ****
-_R = Registers()
+_R   = Registers()
 _INS = Instructions()
 
 REGISTER_SIZE = {}
-# here we store size of each operand inside the REGISTER_SIZE array 
 for r in _R.R_8:      REGISTER_SIZE[r] = OperandSize.BYTE
 for r in _R.ELB:      REGISTER_SIZE[r] = OperandSize.BYTE
 for r in _R.R_16:     REGISTER_SIZE[r] = OperandSize.WORD
@@ -51,8 +48,7 @@ for r in _R.AVX:      REGISTER_SIZE[r] = OperandSize.QWORD
 for r in _R.FLAGS:    REGISTER_SIZE[r] = OperandSize.NONE
 for r in _R.RFLAGS:   REGISTER_SIZE[r] = OperandSize.NONE
 
-# MNEMONIC -> Opcode Lookup 
-# "MOV" -> [b"\x89", b"\x8B", ...]
+# MNEMONIC -> Opcode Lookup
 OPCODE_TABLE = {}
 for name, opcodes in _INS.GPA_OPS.items():    OPCODE_TABLE[name] = opcodes
 for name, opcodes in _INS.DATA_T.items():     OPCODE_TABLE[name] = opcodes
@@ -61,73 +57,90 @@ for name, opcodes in _INS.BIT_MANI.items():   OPCODE_TABLE[name] = opcodes
 for name, opcodes in _INS.SSE.items():        OPCODE_TABLE[name] = opcodes
 for name, opcodes in _INS.SYSTEM_INS.items(): OPCODE_TABLE[name] = opcodes
 
-# *** Operands  **** 
-class Operand: 
-    def __init__(self, op_type, value , size=OperandSize.NONE):
-        self.op_type = op_type # Operand type 
-        self.value = value # main or EAX or numbers like 55 
-        self.size = size # operand size 
-        # mem field : [BASE + INDEX * SCALE + DISP]
-        self.base = None # base register 
-        self.index = None # index register 
-        self.scale = 1 # 1 , 2 ,4 ,8 , 16 , 32 , 64  
-        self.disp = 0 # displacement 
 
-        # shellcode 
-        self.is_rip_relative = False # when the operand using RIP relative addressing
+# **** Operands ****
+class Operand:
+    def __init__(self, op_type, value, size=OperandSize.NONE):
+        self.op_type = op_type
+        self.value   = value
+        self.size    = size
+        # mem field : [BASE + INDEX * SCALE + DISP]
+        self.base  = None
+        self.index = None
+        self.scale = 1
+        self.disp  = 0
+        # shellcode
+        self.is_rip_relative = False
+        # resolved by symbol table pass 2
+        self.resolved_offset = None
 
     def __repr__(self):
-        return f"Operand({self.op_type}, {self.value}, size={self.size})"  # ← fixed: was self.kind
+        return f"Operand({self.op_type}, {self.value}, size={self.size})"
 
-# **** IR Nodes  ****
-class IRInstructions: 
-    def __init__(self, mnemonic, operands=None , line=0, column=0):  # ← fixed: NONE → None
+
+# **** IR Nodes ****
+class IRInstructions:
+    def __init__(self, mnemonic, operands=None, line=0, column=0):
         self.mnemonic = mnemonic
         self.operands = operands if operands is not None else []
-        self.line = line
-        self.column = column 
-        # Opcodes from instructions.py 
-        # encoder picks the right one based on operands 
-        self.opcode = OPCODE_TABLE.get(mnemonic, [])
-        # PIC test (purpose:mainly for shellcode engine )
-        self.pic_good = False # good for PIC analysis 
-        self.uses_abs = False # using Absolute address
-        # Encoding 
-        self.enc_pref  = EncodingPref.DEFAULT  # ← fixed: class renamed
-        self.enc_bytes = None # filled by encoder 
+        self.line     = line
+        self.column   = column
+        # opcodes from instructions.py
+        # encoder picks the right one based on operands
+        self.opcode   = OPCODE_TABLE.get(mnemonic, [])
+        # PIC test (purpose: mainly for shellcode engine)
+        self.pic_good = False
+        self.uses_abs = False
+        # encoding
+        self.enc_pref  = EncodingPref.DEFAULT
+        self.enc_bytes = None
 
-        self.forbidden = set()
+        self.forbidden             = set()
         self.satisfies_constraints = True
 
     def __repr__(self):
         ops = ", ".join(repr(o) for o in self.operands)
         return f"IRInstruction({self.mnemonic}, [{ops}])"
 
-class IRLabel: # this is for labels like "main: "
+
+class IRLabel:
     def __init__(self, name, line=0, column=0):
-        self.name = name
-        self.line = line 
-        self.column = column
+        self.name     = name
+        self.line     = line
+        self.column   = column
         self.is_local = name.startswith(".")
-        self.offset = None
+        self.offset   = None   # filled by symbol table pass 1
+
     def __repr__(self):
         return f"IRLabel({self.name!r}, local={self.is_local})"
 
-class IRDirectives: 
-    def __init__(self, name , args=None, line=0, column=0):
-        self.name = name
-        self.args = args if args is not None else []
-        self.line = line 
+
+class IRDirectives:
+    def __init__(self, name, args=None, line=0, column=0):
+        self.name   = name
+        self.args   = args if args is not None else []
+        self.line   = line
         self.column = column
+
     def __repr__(self):
         return f"IRDirective({self.name!r}, {self.args})"
 
-class IRData: 
-    def __init__(self, label, size, values=None, line=0):
-        self.label = label 
-        self.size = size
-        self.values = values if values is not None else []
-        self.line = line
+
+class IRData:
+    def __init__(
+        self,
+        label,
+        size,
+        values     = None,
+        line       = 0,
+        is_reserve = False,   # ← fix: True for RESB/RESW/RESD/RESQ
+    ):
+        self.label      = label
+        self.size       = size
+        self.values     = values if values is not None else []
+        self.line       = line
+        self.is_reserve = is_reserve
+
     def __repr__(self):
         return f"IRData({self.label!r}, size={self.size}, {self.values})"
 
@@ -143,9 +156,9 @@ class ShellcodeConstraints:
     """
     def __init__(self):
         self.forbidden_bytes = set()
-        self.max_size = 0 # 0 = unlimited
-        self.pic_mode = False
-        self.encoding_pref = EncodingPref.DEFAULT  # ← fixed: class renamed
+        self.max_size        = 0
+        self.pic_mode        = False
+        self.encoding_pref   = EncodingPref.DEFAULT
 
     def add_badchar(self, byte):
         self.forbidden_bytes.add(byte)
@@ -154,7 +167,6 @@ class ShellcodeConstraints:
         return byte not in self.forbidden_bytes
 
     def check_bytes(self, raw_bytes):
-        # returns list of (offset, byte) violations
         violations = []
         for i, b in enumerate(raw_bytes):
             if b in self.forbidden_bytes:
@@ -169,25 +181,26 @@ class ShellcodeConstraints:
             f"pic={self.pic_mode}, "
             f"enc={self.encoding_pref})"
         )
- 
-# **** IR Layer **** 
-class IRProgram: 
+
+
+# **** IR Layer ****
+class IRProgram:
     def __init__(self):
         self.nodes       = []
         self.constraints = ShellcodeConstraints()
-        self.symbols     = {}   # label name -> byte offset, filled by encoder
+        self.symbols     = {}
 
     def add(self, node):
         self.nodes.append(node)
 
     def instructions(self):
-        return [n for n in self.nodes if isinstance(n, IRInstructions)] 
+        return [n for n in self.nodes if isinstance(n, IRInstructions)]
 
     def labels(self):
         return [n for n in self.nodes if isinstance(n, IRLabel)]
 
     def directives(self):
-        return [n for n in self.nodes if isinstance(n, IRDirectives)] 
+        return [n for n in self.nodes if isinstance(n, IRDirectives)]
 
     def data(self):
         return [n for n in self.nodes if isinstance(n, IRData)]
@@ -199,15 +212,15 @@ class IRProgram:
         print("=" * 60)
         for node in self.nodes:
 
-            if isinstance(node, IRInstructions):                         
+            if isinstance(node, IRInstructions):
                 ops = ", ".join(
-                    f"{o.op_type}:{o.value!r}(sz={o.size})"          
+                    f"{o.op_type}:{o.value!r}(sz={o.size})"
                     for o in node.operands
                 )
                 print(
                     f"  INSTR   {node.mnemonic:<14}"
                     f"  ops=[{ops}]"
-                    f"  pic={node.pic_good}"                              
+                    f"  pic={node.pic_good}"
                     f"  enc={node.enc_pref}"
                 )
 
@@ -218,7 +231,7 @@ class IRProgram:
                     f"  offset={node.offset}"
                 )
 
-            elif isinstance(node, IRDirectives):                         
+            elif isinstance(node, IRDirectives):
                 print(
                     f"  DIR     {node.name:<14}"
                     f"  args={node.args}"
@@ -229,6 +242,7 @@ class IRProgram:
                     f"  DATA    {str(node.label):<14}"
                     f"  size={node.size}"
                     f"  values={node.values}"
+                    f"  reserve={node.is_reserve}"
                 )
 
         print("=" * 60)
