@@ -256,7 +256,7 @@ class SymbolTable:
                     offset = node.args[0]
                     self.base_address = offset
 
-    # ── pass 2 : resolve globals, externs, label refs ─────
+    # ****  pass 2 : resolve globals, externs, label refs **** 
 
     def _pass2_resolve(self, program: IRProgram) -> None:
         """
