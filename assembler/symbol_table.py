@@ -79,7 +79,13 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
     mnemonic = instr.mnemonic
     ops      = instr.operands
 
-    # no operands
+    # SYSCALL — always 2 bytes (0F 05)
+    # must be checked FIRST before the no-operands check
+    # because SYSCALL has no operands but is NOT 1 byte
+    if mnemonic == "SYSCALL":
+        return 2
+
+    # no operands — NOP, RET, HLT etc.
     if not ops:
         return 1
 
@@ -109,10 +115,6 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
     # PUSH / POP reg
     if mnemonic in ("PUSH", "POP") and OperandType.REGISTER in types:
         return 1 + rex
-
-    # SYSCALL — always 2 bytes (0F 05)   ← fix 1
-    if mnemonic == "SYSCALL":
-        return 2
 
     # reg + reg
     if types == [OperandType.REGISTER, OperandType.REGISTER]:
@@ -150,7 +152,7 @@ def _estimate_data_size(node: IRData) -> int:
     calculate exact byte size of data definition
     DB "hello"  ->  5 bytes
     DD 42       ->  4 bytes
-    RESB 10     ->  10 bytes  (count * unit)   ← fix 2
+    RESB 10     ->  10 bytes  (count * unit)
     RESW 4      ->  8 bytes   (4 * 2)
     RESD 2      ->  8 bytes   (2 * 4)
     RESQ 1      ->  8 bytes   (1 * 8)
