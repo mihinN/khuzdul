@@ -3,18 +3,7 @@
 # Legacy Prefix | REX | Opcode | ModRM | SIB | Displacement | Immediate 
 # 
  
-class Operand: 
-    def __init__(self, name:str):
-        self.name = name
-        print(self.name)
-
-class EncodingInstructions: 
-    def __init__(self, name:str):
-        self.name = name
-        print(self.name)
-
-
-
-
-
-
+import struct
+from assembler.ir import (IRData, IRDirectives, IRInstructions, IRLabel, IRProgram, Instructions, Operand, OperandSize, OperandType, EncodingPref)
+from assembler.symbol_table import SymbolTable
+from assembler.error import EncoderError
