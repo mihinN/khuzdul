@@ -100,4 +100,7 @@ no biased , no cheerleading
 
 
 
- 
+- How vector Instructions used to Obfuscated the shellcode/payload 
+because most of the time , shellcodes use integer instructions , yes , it has their owne reasons like 
+syscalls are encoded as integers , but you can use vector instructions creativiely. 
+in other hand , wherethe you cretive or not , EDR detects when you call execv "bin/shell" like instructions/commands
