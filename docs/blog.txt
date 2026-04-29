@@ -129,3 +129,17 @@ strace/ltrace         AT&T          System call tracing
 
 - Difference between Windows generated(MSVC or something) vs 
 Linux generated GCC like compilers: 
+
+What you're really describing is:
+
+    FEDERATED LEARNING
+        applied to
+    HARDWARE EXECUTION PROFILES
+        distributed via
+    PEER TO PEER MESH
+        feeding back into
+    CPU MICROCODE + OS LOADERS + COMPILERS
+
+
+
+    
