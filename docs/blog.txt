@@ -104,3 +104,28 @@ no biased , no cheerleading
 because most of the time , shellcodes use integer instructions , yes , it has their owne reasons like 
 syscalls are encoded as integers , but you can use vector instructions creativiely. 
 in other hand , wherethe you cretive or not , EDR detects when you call execv "bin/shell" like instructions/commands
+
+Windows Tool          Syntax        Notes
+─────────────────────────────────────────────────────
+MSVC  (cl.exe)        Intel         Microsoft's own compiler
+MASM  (ml64.exe)      Intel         Microsoft's assembler
+NASM                  Intel         Popular on Windows
+x64dbg                Intel         Default debugger view
+WinDbg                Intel         Microsoft's debugger
+IDA Pro               Intel         Default view
+Ghidra                Intel         Default view
+Visual Studio         Intel         Inline asm + disassembly
+
+
+Linux Tool            Syntax        Notes
+─────────────────────────────────────────────────────
+GCC  (gcc -S)         AT&T          Default output
+GNU as (gas)          AT&T          GNU assembler default
+GDB                   AT&T          Default (can switch)
+objdump               AT&T          Default (can switch)
+strace/ltrace         AT&T          System call tracing
+
+
+
+- Difference between Windows generated(MSVC or something) vs 
+Linux generated GCC like compilers: 
