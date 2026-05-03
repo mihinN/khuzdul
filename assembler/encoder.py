@@ -185,20 +185,772 @@ def encode_immediate(value: int, size: int)-> bytes:
 
 # **** Memory Operand Helper ****
 
+def _encode_memory(
+    result:   EncodedInstructions,
+    reg_field: int,               # reg field in ModRM (source/dest register)
+    mem_op:   Operand,            # the memory operand
+    is_64:    bool = False,       # 64-bit mode
+) -> None:
+    """
+    fills result.modrm, result.sib, result.displacement
+    for a memory operand [base + index*scale + disp]
+    """
+    base      = mem_op.base
+    index     = mem_op.index
+    scale     = mem_op.scale
+    disp      = mem_op.disp
+ 
+    # REX extensions for memory
+    rex_b = _is_extended(base)  if base  else False
+    rex_x = _is_extended(index) if index else False
+    # update REX if needed
+    if rex_b or rex_x:
+        old_rex = result.rex
+        w = bool(old_rex and (old_rex[0] & 0x08))
+        r = bool(old_rex and (old_rex[0] & 0x04))
+        result.rex = encode_rex(w=w, r=r, x=rex_x, b=rex_b)
+ 
+    base_enc  = (_reg_num(base)  & 0x7) if base  else 0
+    index_enc = (_reg_num(index) & 0x7) if index else 0
+ 
+    # RIP relative - mod=00, r/m=101, 32-bit displacement
+    if base and base.upper() == "RIP":
+        result.modrm      = encode_modrm(0b00, reg_field, 0b101)
+        result.displacement = encode_displacement(disp, 4)
+        return
+ 
+    # no base - SIB with no base (mod=00, r/m=100, base=101)
+    if base is None and index is not None:
+        result.modrm = encode_modrm(0b00, reg_field, 0b100)
+        result.sib   = encode_sib(scale, index_enc, 0b101)
+        result.displacement = encode_displacement(disp, 4)
+        return
+ 
+    # no base, no index — direct address
+    if base is None and index is None:
+        result.modrm = encode_modrm(0b00, reg_field, 0b101)
+        result.displacement = encode_displacement(disp, 4)
+        return
+ 
+    # needs SIB - base=ESP/RSP or has index
+    needs_sib = (
+        index is not None or
+        (base and base.upper() in ("ESP", "RSP", "R12", "R12D"))
+    )
+ 
+    if needs_sib:
+        idx = index_enc if index else 0b100   # 100 = no index
+        sib = encode_sib(scale if index else 1, idx, base_enc)
+    else:
+        sib = b""
+ 
+    # choose mod based on displacement size
+    if disp == 0 and base and base.upper() not in ("EBP", "RBP", "R13", "R13D"):
+        mod      = 0b00
+        disp_bytes = b""
+        disp_size  = 0
+    elif -128 <= disp <= 127:
+        mod      = 0b01
+        disp_size  = 1
+    else:
+        mod      = 0b10
+        disp_size  = 4
+ 
+    rm = 0b100 if needs_sib else base_enc
+ 
+    result.modrm       = encode_modrm(mod, reg_field, rm)
+    result.sib         = sib
+    result.displacement = encode_displacement(disp, disp_size)
 # **** Instructions Encoder **** 
+def _encode_nop():
+    return b"\x90"
+def _encode_ret(_instr, _sym) -> bytes:
+    return b"\xC3"
+def _encode_hlt(_instr, _sym):
+    return b"\xF4"
+def _encode_syscall(_instr, _sym) -> bytes:
+    return b"\x0F\x05"
+ 
+ 
+def _encode_push(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    op = instr.operands[0]
+    result = EncodedInstructions()
+ 
+    if op.op_type == OperandType.REGISTER:
+        reg = op.value.upper()
+        num = _reg_num(reg)
+ 
+        if _is_64bit(reg):
+            # PUSH r64 — 0x50+rd (no REX needed for default 64-bit)
+            if num >= 8:
+                result.rex    = encode_rex(b=True)
+            result.opcode = bytes([0x50 + (num & 0x7)])
+ 
+        elif _is_16bit(reg):
+            # PUSH r16 — 66 prefix + 0x50+rw
+            result.legacy_prefix = b"\x66"
+            result.opcode        = bytes([0x50 + (num & 0x7)])
+ 
+        else:
+            result.opcode = bytes([0x50 + (num & 0x7)])
+ 
+    elif op.op_type == OperandType.IMMEDIATE:
+        v = op.value
+        if -128 <= v <= 127:
+            result.opcode    = b"\x6A"
+            result.immediate = encode_immediate(v, 1)
+        else:
+            result.opcode    = b"\x68"
+            result.immediate = encode_immediate(v, 4)
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_pop(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    op  = instr.operands[0]
+    result = EncodedInstructions()
+ 
+    if op.op_type == OperandType.REGISTER:
+        reg = op.value.upper()
+        num = _reg_num(reg)
+ 
+        if _is_64bit(reg):
+            if num >= 8:
+                result.rex = encode_rex(b=True)
+            result.opcode = bytes([0x58 + (num & 0x7)])
+ 
+        elif _is_16bit(reg):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = bytes([0x58 + (num & 0x7)])
+ 
+        else:
+            result.opcode = bytes([0x58 + (num & 0x7)])
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_mov(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    dst = instr.operands[0]
+    src = instr.operands[1]
+    result = EncodedInstructions()
+ 
+    # MOV reg, reg
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.REGISTER:
+        d = dst.value.upper()
+        s = src.value.upper()
+ 
+        if _is_64bit(d):
+            result.rex    = encode_rex(
+                w = True,
+                r = _is_extended(s),
+                b = _is_extended(d),
+            )
+            result.opcode = b"\x89"
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+ 
+        elif _is_32bit(d):
+            if _is_extended(s) or _is_extended(d):
+                result.rex = encode_rex(
+                    r = _is_extended(s),
+                    b = _is_extended(d),
+                )
+            result.opcode = b"\x89"
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+ 
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\x89"
+            result.modrm         = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+ 
+        elif _is_8bit(d):
+            result.opcode = b"\x88"
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+ 
+        return result.to_bytes()
+ 
+    # MOV reg, imm
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.IMMEDIATE:
+        d   = dst.value.upper()
+        num = _reg_num(d)
+        v   = src.value
+ 
+        if _is_64bit(d):
+            result.rex    = encode_rex(w=True, b=_is_extended(d))
+            result.opcode = bytes([0xB8 + (num & 0x7)])
+            result.immediate = encode_immediate(v, 8)
+ 
+        elif _is_32bit(d):
+            if _is_extended(d):
+                result.rex = encode_rex(b=True)
+            result.opcode    = bytes([0xB8 + (num & 0x7)])
+            result.immediate = encode_immediate(v, 4)
+ 
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = bytes([0xB8 + (num & 0x7)])
+            result.immediate     = encode_immediate(v, 2)
+ 
+        elif _is_8bit(d):
+            result.opcode    = bytes([0xB0 + (num & 0x7)])
+            result.immediate = encode_immediate(v, 1)
+ 
+        return result.to_bytes()
+ 
+    # MOV reg, mem
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.MEMORY:
+        d = dst.value.upper()
+ 
+        if _is_64bit(d):
+            result.rex    = encode_rex(w=True, r=_is_extended(d))
+            result.opcode = b"\x8B"
+        elif _is_32bit(d):
+            if _is_extended(d):
+                result.rex = encode_rex(r=True)
+            result.opcode = b"\x8B"
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\x8B"
+        elif _is_8bit(d):
+            result.opcode = b"\x8A"
+ 
+        _encode_memory(result, _reg_enc(d), src)
+        return result.to_bytes()
+ 
+    # MOV mem, reg
+    if dst.op_type == OperandType.MEMORY and src.op_type == OperandType.REGISTER:
+        s = src.value.upper()
+ 
+        if _is_64bit(s):
+            result.rex    = encode_rex(w=True, r=_is_extended(s))
+            result.opcode = b"\x89"
+        elif _is_32bit(s):
+            if _is_extended(s):
+                result.rex = encode_rex(r=True)
+            result.opcode = b"\x89"
+        elif _is_16bit(s):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\x89"
+        elif _is_8bit(s):
+            result.opcode = b"\x88"
+ 
+        _encode_memory(result, _reg_enc(s), dst)
+        return result.to_bytes()
+ 
+    # MOV mem, imm
+    if dst.op_type == OperandType.MEMORY and src.op_type == OperandType.IMMEDIATE:
+        v         = src.value
+        hint      = dst.size
+ 
+        if hint == OperandSize.QWORD:
+            result.rex    = encode_rex(w=True)
+            result.opcode = b"\xC7"
+            _encode_memory(result, 0, dst)
+            result.immediate = encode_immediate(v, 4)
+        elif hint == OperandSize.DWORD:
+            result.opcode = b"\xC7"
+            _encode_memory(result, 0, dst)
+            result.immediate = encode_immediate(v, 4)
+        elif hint == OperandSize.WORD:
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\xC7"
+            _encode_memory(result, 0, dst)
+            result.immediate     = encode_immediate(v, 2)
+        elif hint == OperandSize.BYTE:
+            result.opcode = b"\xC6"
+            _encode_memory(result, 0, dst)
+            result.immediate = encode_immediate(v, 1)
+ 
+        return result.to_bytes()
+ 
+    raise EncoderError(
+        f"[line {instr.line}] MOV: unsupported operand combination "
+        f"{dst.op_type} {src.op_type}"
+    )
+ 
+ 
+def _encode_alu(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    """
+    handles ADD SUB AND OR XOR CMP TEST
+    all share the same ModRM pattern
+    """
+    mnemonic = instr.mnemonic
+    dst      = instr.operands[0]
+    src      = instr.operands[1]
+    result   = EncodedInstructions()
+ 
+    # opcode base and /digit for imm form
+    op_map = {
+        #  mnemonic : (reg_reg_opcode, reg_rm_opcode, imm_digit, al_ax_imm)
+        "ADD": (b"\x01", b"\x03", 0, b"\x05"),
+        "SUB": (b"\x29", b"\x2B", 5, b"\x2D"),
+        "AND": (b"\x21", b"\x23", 4, b"\x25"),
+        "OR":  (b"\x09", b"\x0B", 1, b"\x0D"),
+        "XOR": (b"\x31", b"\x33", 6, b"\x35"),
+        "CMP": (b"\x39", b"\x3B", 7, b"\x3D"),
+    }
+ 
+    if mnemonic not in op_map:
+        raise EncoderError(f"_encode_alu called with {mnemonic}")
+ 
+    op_rm_r, op_r_rm, imm_digit, _ = op_map[mnemonic]
+ 
+    # reg, reg
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.REGISTER:
+        d = dst.value.upper()
+        s = src.value.upper()
+ 
+        if _is_64bit(d):
+            result.rex    = encode_rex(w=True, r=_is_extended(s), b=_is_extended(d))
+            result.opcode = op_rm_r
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+        elif _is_32bit(d):
+            if _is_extended(s) or _is_extended(d):
+                result.rex = encode_rex(r=_is_extended(s), b=_is_extended(d))
+            result.opcode = op_rm_r
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = op_rm_r
+            result.modrm         = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+        elif _is_8bit(d):
+            op8 = bytes([op_rm_r[0] - 1])   # 8-bit form is one byte less
+            result.opcode = op8
+            result.modrm  = encode_modrm(0b11, _reg_enc(s), _reg_enc(d))
+ 
+        return result.to_bytes()
+ 
+    # reg, imm
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.IMMEDIATE:
+        d = dst.value.upper()
+        v = src.value
+ 
+        if _is_64bit(d):
+            result.rex = encode_rex(w=True, b=_is_extended(d))
+            if -128 <= v <= 127:
+                result.opcode    = b"\x83"
+                result.modrm     = encode_modrm(0b11, imm_digit, _reg_enc(d))
+                result.immediate = encode_immediate(v, 1)
+            else:
+                result.opcode    = b"\x81"
+                result.modrm     = encode_modrm(0b11, imm_digit, _reg_enc(d))
+                result.immediate = encode_immediate(v, 4)
+ 
+        elif _is_32bit(d):
+            if _is_extended(d):
+                result.rex = encode_rex(b=True)
+            if -128 <= v <= 127:
+                result.opcode    = b"\x83"
+                result.modrm     = encode_modrm(0b11, imm_digit, _reg_enc(d))
+                result.immediate = encode_immediate(v, 1)
+            else:
+                result.opcode    = b"\x81"
+                result.modrm     = encode_modrm(0b11, imm_digit, _reg_enc(d))
+                result.immediate = encode_immediate(v, 4)
+ 
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\x81"
+            result.modrm         = encode_modrm(0b11, imm_digit, _reg_enc(d))
+            result.immediate     = encode_immediate(v, 2)
+ 
+        elif _is_8bit(d):
+            result.opcode    = b"\x80"
+            result.modrm     = encode_modrm(0b11, imm_digit, _reg_enc(d))
+            result.immediate = encode_immediate(v, 1)
+ 
+        return result.to_bytes()
+ 
+    # reg, mem
+    if dst.op_type == OperandType.REGISTER and src.op_type == OperandType.MEMORY:
+        d = dst.value.upper()
+ 
+        if _is_64bit(d):
+            result.rex    = encode_rex(w=True, r=_is_extended(d))
+            result.opcode = op_r_rm
+        elif _is_32bit(d):
+            if _is_extended(d):
+                result.rex = encode_rex(r=True)
+            result.opcode = op_r_rm
+        elif _is_16bit(d):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = op_r_rm
+ 
+        _encode_memory(result, _reg_enc(d), src)
+        return result.to_bytes()
+ 
+    raise EncoderError(
+        f"[line {instr.line}] {mnemonic}: unsupported operand combination"
+    )
+ 
+ 
+def _encode_xor(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    return _encode_alu(instr, sym)
+ 
+ 
+def _encode_inc_dec(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    mnemonic = instr.mnemonic
+    op       = instr.operands[0]
+    result   = EncodedInstructions()
+    digit    = 0 if mnemonic == "INC" else 1   # /0 for INC, /1 for DEC
+ 
+    if op.op_type == OperandType.REGISTER:
+        r = op.value.upper()
+ 
+        if _is_64bit(r):
+            result.rex    = encode_rex(w=True, b=_is_extended(r))
+            result.opcode = b"\xFF"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_32bit(r):
+            if _is_extended(r):
+                result.rex = encode_rex(b=True)
+            result.opcode = b"\xFF"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_16bit(r):
+            result.legacy_prefix = b"\x66"
+            result.opcode        = b"\xFF"
+            result.modrm         = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_8bit(r):
+            result.opcode = b"\xFE"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_neg_not(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    mnemonic = instr.mnemonic
+    op       = instr.operands[0]
+    result   = EncodedInstructions()
+    digit    = 3 if mnemonic == "NEG" else 2   # /3 for NEG, /2 for NOT
+ 
+    if op.op_type == OperandType.REGISTER:
+        r = op.value.upper()
+ 
+        if _is_64bit(r):
+            result.rex    = encode_rex(w=True, b=_is_extended(r))
+            result.opcode = b"\xF7"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_32bit(r):
+            if _is_extended(r):
+                result.rex = encode_rex(b=True)
+            result.opcode = b"\xF7"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_8bit(r):
+            result.opcode = b"\xF6"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_mul_div(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    mnemonic = instr.mnemonic
+    op       = instr.operands[0]
+    result   = EncodedInstructions()
+ 
+    digit_map = {"MUL": 4, "IMUL": 5, "DIV": 6, "IDIV": 7}
+    digit = digit_map[mnemonic]
+ 
+    if op.op_type == OperandType.REGISTER:
+        r = op.value.upper()
+ 
+        if _is_64bit(r):
+            result.rex    = encode_rex(w=True, b=_is_extended(r))
+            result.opcode = b"\xF7"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_32bit(r):
+            if _is_extended(r):
+                result.rex = encode_rex(b=True)
+            result.opcode = b"\xF7"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+        elif _is_8bit(r):
+            result.opcode = b"\xF6"
+            result.modrm  = encode_modrm(0b11, digit, _reg_enc(r))
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_shift(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    """handles SHL SHR SAR ROL ROR RCL RCR"""
+    mnemonic = instr.mnemonic
+    dst      = instr.operands[0]
+    src      = instr.operands[1] if len(instr.operands) > 1 else None
+    result   = EncodedInstructions()
+ 
+    digit_map = {
+        "ROL": 0, "ROR": 1, "RCL": 2, "RCR": 3,
+        "SHL": 4, "SHR": 5, "SAR": 7,
+    }
+    digit = digit_map.get(mnemonic, 4)
+ 
+    r = dst.value.upper()
+ 
+    if _is_64bit(r):
+        result.rex    = encode_rex(w=True, b=_is_extended(r))
+        rm_enc        = _reg_enc(r)
+        if src and src.op_type == OperandType.IMMEDIATE:
+            v = src.value
+            if v == 1:
+                result.opcode = b"\xD1"
+                result.modrm  = encode_modrm(0b11, digit, rm_enc)
+            else:
+                result.opcode    = b"\xC1"
+                result.modrm     = encode_modrm(0b11, digit, rm_enc)
+                result.immediate = encode_immediate(v, 1)
+        else:
+            # shift by CL
+            result.opcode = b"\xD3"
+            result.modrm  = encode_modrm(0b11, digit, rm_enc)
+ 
+    elif _is_32bit(r):
+        if _is_extended(r):
+            result.rex = encode_rex(b=True)
+        rm_enc = _reg_enc(r)
+        if src and src.op_type == OperandType.IMMEDIATE:
+            v = src.value
+            if v == 1:
+                result.opcode = b"\xD1"
+                result.modrm  = encode_modrm(0b11, digit, rm_enc)
+            else:
+                result.opcode    = b"\xC1"
+                result.modrm     = encode_modrm(0b11, digit, rm_enc)
+                result.immediate = encode_immediate(v, 1)
+        else:
+            result.opcode = b"\xD3"
+            result.modrm  = encode_modrm(0b11, digit, rm_enc)
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_jmp(instr: IRInstructions, sym: SymbolTable, current_offset: int) -> bytes:
+    """JMP — near relative 32-bit"""
+    op     = instr.operands[0]
+    result = EncodedInstructions()
+ 
+    if op.op_type == OperandType.LABEL_REF:
+        target  = op.resolved_offset
+        # rel32 = target - (current_offset + 5)
+        # 5 = opcode(1) + rel32(4)
+        rel32   = target - (current_offset + 5)
+        result.opcode    = b"\xE9"
+        result.immediate = struct.pack("<i", rel32)
+ 
+    elif op.op_type == OperandType.REGISTER:
+        r = op.value.upper()
+        if _is_64bit(r):
+            if _is_extended(r):
+                result.rex = encode_rex(b=True)
+        result.opcode = b"\xFF"
+        result.modrm  = encode_modrm(0b11, 4, _reg_enc(r))
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_call(instr: IRInstructions, sym: SymbolTable, current_offset: int) -> bytes:
+    """CALL — near relative 32-bit"""
+    op     = instr.operands[0]
+    result = EncodedInstructions()
+ 
+    if op.op_type == OperandType.LABEL_REF:
+        target = op.resolved_offset
+        rel32  = target - (current_offset + 5)
+        result.opcode    = b"\xE8"
+        result.immediate = struct.pack("<i", rel32)
+ 
+    elif op.op_type == OperandType.REGISTER:
+        r = op.value.upper()
+        result.opcode = b"\xFF"
+        result.modrm  = encode_modrm(0b11, 2, _reg_enc(r))
+ 
+    return result.to_bytes()
+ 
+ 
+def _encode_jcc(instr: IRInstructions, sym: SymbolTable, current_offset: int) -> bytes:
+    """conditional jumps — near 32-bit form"""
+    mnemonic = instr.mnemonic
+    op       = instr.operands[0]
+ 
+    # short opcode map (near 32-bit = 0F 8x)
+    jcc_map = {
+        "JO":  0x80, "JNO": 0x81, "JB":  0x82, "JNB": 0x83,
+        "JE":  0x84, "JZ":  0x84, "JNE": 0x85, "JNZ": 0x85,
+        "JBE": 0x86, "JA":  0x87, "JS":  0x88, "JNS": 0x89,
+        "JP":  0x8A, "JNP": 0x8B, "JL":  0x8C, "JGE": 0x8D,
+        "JLE": 0x8E, "JG":  0x8F,
+    }
+ 
+    if mnemonic not in jcc_map:
+        raise EncoderError(f"unknown conditional jump: {mnemonic}")
+ 
+    opcode2 = jcc_map[mnemonic]
+    target  = op.resolved_offset
+    # rel32 = target - (current_offset + 6)
+    # 6 = opcode(2) + rel32(4)
+    rel32   = target - (current_offset + 6)
+ 
+    return b"\x0F" + bytes([opcode2]) + struct.pack("<i", rel32)
+ 
+ 
+def _encode_loop(instr: IRInstructions, sym: SymbolTable, current_offset: int) -> bytes:
+    """LOOP LOOPE LOOPNE — short form only (-128..127)"""
+    mnemonic = instr.mnemonic
+    op       = instr.operands[0]
+ 
+    opcode_map = {"LOOP": 0xE2, "LOOPE": 0xE1, "LOOPNE": 0xE0}
+    opcode = opcode_map[mnemonic]
+ 
+    target = op.resolved_offset
+    # rel8 = target - (current_offset + 2)
+    rel8   = target - (current_offset + 2)
+ 
+    if not (-128 <= rel8 <= 127):
+        raise EncoderError(
+            f"[line {instr.line}] {mnemonic} target out of short range: {rel8}"
+        )
+ 
+    return bytes([opcode]) + struct.pack("<b", rel8)
+ 
+ 
+def _encode_data(node: IRData) -> bytes:
+    """encode DB DW DD DQ RESB RESW RESD RESQ"""
+    size_bytes = {
+        OperandSize.BYTE:  1,
+        OperandSize.WORD:  2,
+        OperandSize.DWORD: 4,
+        OperandSize.QWORD: 8,
+    }
+    unit  = size_bytes.get(node.size, 1)
+    out   = b""
+ 
+    if node.is_reserve:
+        # RESB/RESW/RESD/RESQ — emit count * unit zero bytes
+        for v in node.values:
+            if isinstance(v, int):
+                out += b"\x00" * (unit * v)
+        return out
+ 
+    # DB/DW/DD/DQ — emit actual values
+    fmt_map = {1: "<B", 2: "<H", 4: "<I", 8: "<Q"}
+    fmt     = fmt_map.get(unit, "<B")
+ 
+    for v in node.values:
+        if isinstance(v, str):
+            out += v.encode("utf-8")
+        elif isinstance(v, int):
+            out += struct.pack(fmt, v & ((1 << (unit * 8)) - 1))
+ 
+    return out
+ 
+ 
 # **** Dispatch table **** 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# instructions that need current_offset for relative jumps
+_JUMP_MNEMONICS = {
+    "JMP", "CALL",
+    "JO",  "JNO", "JB",  "JNB", "JE",  "JZ",
+    "JNE", "JNZ", "JBE", "JA",  "JS",  "JNS",
+    "JP",  "JNP", "JL",  "JGE", "JLE", "JG",
+    "LOOP","LOOPE","LOOPNE",
+}
+ 
+_ALU_MNEMONICS = {"ADD", "SUB", "AND", "OR", "XOR", "CMP"}
+ 
+_SHIFT_MNEMONICS = {"SHL", "SHR", "SAR", "ROL", "ROR", "RCL", "RCR"}
+ 
+_SIMPLE = {
+    "NOP":    _encode_nop,
+    "RET":    _encode_ret,
+    "HLT":    _encode_hlt,
+    "SYSCALL":_encode_syscall,
+}
+ 
+_ONE_OP = {
+    "PUSH":  _encode_push,
+    "POP":   _encode_pop,
+    "INC":   _encode_inc_dec,
+    "DEC":   _encode_inc_dec,
+    "NEG":   _encode_neg_not,
+    "NOT":   _encode_neg_not,
+    "MUL":   _encode_mul_div,
+    "IMUL":  _encode_mul_div,
+    "DIV":   _encode_mul_div,
+    "IDIV":  _encode_mul_div,
+}
+ 
+# **** Main Encoder **** 
+class Encoder:
+    def __init__(self, program: IRProgram, sym_table: SymbolTable):
+        self.program   = program
+        self.sym_table = sym_table
+        self.output    = b""
+        self.offset    = sym_table.base_address
+ 
+    def encode(self) -> bytes:
+        """
+        walk all IR nodes and encode to bytes
+        """
+        for node in self.program.nodes:
+ 
+            if isinstance(node, IRInstructions):
+                encoded = self._encode_instruction(node)
+                # store exact encoded bytes back into IR node
+                node.enc_bytes = encoded
+                self.output   += encoded
+                self.offset   += len(encoded)
+ 
+            elif isinstance(node, IRData):
+                encoded = _encode_data(node)
+                self.output += encoded
+                self.offset += len(encoded)
+ 
+            elif isinstance(node, IRLabel):
+                # labels produce no bytes
+                pass
+ 
+            elif isinstance(node, IRDirectives):
+                # directives produce no bytes (handled by symbol table)
+                pass
+ 
+        return self.output
+ 
+    def _encode_instruction(self, instr: IRInstructions) -> bytes:
+        mnemonic = instr.mnemonic
+ 
+        # simple no-operand instructions
+        if mnemonic in _SIMPLE:
+            return _SIMPLE[mnemonic](instr, self.sym_table)
+ 
+        # single operand instructions
+        if mnemonic in _ONE_OP:
+            return _ONE_OP[mnemonic](instr, self.sym_table)
+ 
+        # two operand instructions
+        if mnemonic == "MOV":
+            return _encode_mov(instr, self.sym_table)
+ 
+        if mnemonic in _ALU_MNEMONICS:
+            return _encode_alu(instr, self.sym_table)
+ 
+        if mnemonic in _SHIFT_MNEMONICS:
+            return _encode_shift(instr, self.sym_table)
+ 
+        # jump / call — need current offset for relative calculation
+        if mnemonic in _JUMP_MNEMONICS:
+            return self._encode_jump(instr)
+ 
+        raise EncoderError(
+            f"[line {instr.line}] unsupported mnemonic: '{mnemonic}'"
+        )
+ 
+    def _encode_jump(self, instr: IRInstructions) -> bytes:
+        mnemonic = instr.mnemonic
+ 
+        if mnemonic == "JMP":
+            return _encode_jmp(instr, self.sym_table, self.offset)
+ 
+        if mnemonic == "CALL":
+            return _encode_call(instr, self.sym_table, self.offset)
+ 
+        if mnemonic in ("LOOP", "LOOPE", "LOOPNE"):
+            return _encode_loop(instr, self.sym_table, self.offset)
+ 
+        # all other Jcc
+        return _encode_jcc(instr, self.sym_table, self.offset)
