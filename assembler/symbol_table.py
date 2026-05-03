@@ -110,7 +110,7 @@ def _estimate_instruction_size(instr: IRInstructions) -> int:
         "JP",  "JNP", "JCXZ","JECXZ",
         "LOOP","LOOPE","LOOPNE",
     ):
-        return 6
+        return 5
 
     # PUSH / POP reg
     if mnemonic in ("PUSH", "POP") and OperandType.REGISTER in types:
