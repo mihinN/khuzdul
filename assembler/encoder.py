@@ -109,6 +109,91 @@ class EncodedInstructions:
         return f"Encoded({self.to_bytes().hex()})"
     
 # **** Encoding each slot ****
+# **** Encoding legacy prefix **** 
+
+def encoding_legacy(
+        operand_size_override: bool = False, 
+        address_size: bool = False, 
+        lock: bool = False, 
+        rep: bool = False, 
+        repne: bool = False,)-> bytes:
+    prefix = b""
+    if lock: prefix += b"\xF0"
+    if repne: prefix += b"\xF2"
+    if rep: prefix += b"\xF3"
+    if operand_size_override: prefix += b"\x66"
+    if address_size: prefix += b"\x67"
+    return prefix
+
+# *** encode REXbit ****
+"""
+RWXB : 1byte : 0100 : showing this is rex : 0000 : for RWXB 
+W : 1000
+R : 0100
+X : 0010
+B : 0001
+"""
+def encode_rex(w: bool, r: bool, x: bool, b: bool) -> bytes:
+    if not([w, r, x, b]):
+        return b""
+    byte = 0x40 # 0100
+    if w: byte |= 0x80
+    if r: byte |= 0x04
+    if x: byte |= 0x02
+    if b: byte |= 0x01
+    return bytes([byte])
+
+def encode_modrm(mod: int, reg: int, rm: int) -> bytes: 
+    """
+    mod : 2 bits  00=mem 01=mem+disp8 10=mem+disp32 11=reg
+    reg : 3 bits  register or opcode extension /0-/7
+    rm  : 3 bits  register or memory base
+    """
+    assert 0 <= mod <= 3, f"mod out of range: {mod}"
+    assert 0 <= reg <= 7, f"reg out of range: {reg}"
+    assert 0 <= rm  <= 7, f"rm out of range: {rm}"
+    return bytes([(mod << 6) | (reg << 3) | rm])
+
+def encode_sib(scale: int, index: int, base: int) -> bytes:
+    """
+    scale: 1/2/4/8 -> encoded as 0/1/2/3
+    index: 3 bits
+    base:  3 bits
+    """
+    scale_enc = {1: 0, 2: 1, 4: 2, 8: 3}
+    if scale not in scale_enc:
+        raise EncoderError(f"invalid SIB scale: {scale}")
+    return bytes([(scale_enc[scale] << 6) | (index << 3) | base])
+
+def encode_displacement(value: int , size: int)-> bytes:
+    """
+    size: 0=none  1=8bit  4=32bit
+    """
+    if size == 0: return b""
+    if size == 1: return struct.pack("<b", value)
+    if size == 4: return struct.pack("<i", value)
+    raise EncoderError(f"invalid displacement size: {size}")
+
+def encode_immediate(value: int, size: int)-> bytes:
+    """
+    size: 1=imm8  2=imm16  4=imm32  8=imm64
+    """
+    fmts = {1: "<b", 2: "<h", 4: "<i", 8: "<q"}
+    if size not in fmts:
+        raise EncoderError(f"invalid immediate size: {size}")
+    return struct.pack(fmts[size], value)
+
+# **** Memory Operand Helper ****
+
+# **** Instructions Encoder **** 
+# **** Dispatch table **** 
+
+
+
+
+
+
+
 
 
 
