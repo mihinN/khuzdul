@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "khuzdul"
+version = "0.1.0a1"
+description = "A strict, zero-abstraction two-pass x86-64 assembler"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "mihinN", email = "39882449+mihinN@users.noreply.github.com",}
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+khuzdul = "khuzdul:main"
+
+[tool.setuptools]
+packages = ["assembler", "isa"]
+py-modules = ["khuzdul"]
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["test"]
