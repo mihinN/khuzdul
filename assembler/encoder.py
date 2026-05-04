@@ -908,6 +908,7 @@ _ONE_OP = {
     "IMUL":  _encode_mul_div,
     "DIV":   _encode_mul_div,
     "IDIV":  _encode_mul_div,
+    "INT":   _encode_int,
 }
 
 
