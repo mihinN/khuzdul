@@ -9,10 +9,11 @@ description = "A strict, zero-abstraction two-pass x86-64 assembler"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Mihin Nimnaka",}
+    { name = "mihinN"}
 ]
 
 [project.optional-dependencies]
+# Installed only when you run `pip install -e .[dev]`
 dev = [
     "pytest>=7.0.0",
 ]
@@ -23,10 +24,11 @@ dev = [
 khuzdul = "khuzdul:main"
 
 [tool.setuptools]
+# Tells the build system to include these folders and your main script
 packages = ["assembler", "isa"]
-# Update this to match your renamed script
 py-modules = ["khuzdul"]
 
 [tool.pytest.ini_options]
+# Automatically makes pytest output cleaner and points it to your test folder
 addopts = "-v"
 testpaths = ["test"]
