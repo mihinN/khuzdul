@@ -152,30 +152,14 @@ def _size_memory_operand(mem: Operand) -> int:
     # displacement-only (no base, no index)
     if base == "" and index == "":
         return 1 + 4
-
-<<<<<<< HEAD
     if disp == 0 and base not in {"EBP","RBP","R13","R13D"}:
         pass    # no displacement
     elif -128 <= disp <= 127:
         size += 1
     else:
         size += 4
-=======
-    # jump / call — 2 byte opcode + 4 byte offset
-    if mnemonic in (
-        "JMP", "CALL",
-        "JZ",  "JNZ", "JE",  "JNE",
-        "JL",  "JLE", "JG",  "JGE",
-        "JB",  "JBE", "JA",  "JAE",
-        "JS",  "JNS", "JO",  "JNO",
-        "JP",  "JNP", "JCXZ","JECXZ",
-        "LOOP","LOOPE","LOOPNE",
-    ):
-        return 5
->>>>>>> encoder
 
     return size
-
 
 def _estimate_instr_size(instr: IRInstructions) -> int:
     m  = instr.mnemonic
