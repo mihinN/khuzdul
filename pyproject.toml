@@ -13,22 +13,17 @@ authors = [
 ]
 
 [project.optional-dependencies]
-# Installed only when you run `pip install -e .[dev]`
 dev = [
     "pytest>=7.0.0",
 ]
 
 [project.scripts]
-# This creates the terminal command 'khuzdul' 
-# and points it to the main() function inside khuzdul.py
 khuzdul = "khuzdul:main"
 
 [tool.setuptools]
-# Tells the build system to include these folders and your main script
 packages = ["assembler", "isa"]
 py-modules = ["khuzdul"]
 
 [tool.pytest.ini_options]
-# Automatically makes pytest output cleaner and points it to your test folder
 addopts = "-v"
 testpaths = ["test"]
