@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "khuzdul"
+version = "0.1.0a1"
+description = "A strict, zero-abstraction two-pass x86-64 assembler"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Mihin Nimnaka",}
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+# This creates the terminal command 'khuzdul' 
+# and points it to the main() function inside khuzdul.py
+khuzdul = "khuzdul:main"
+
+[tool.setuptools]
+packages = ["assembler", "isa"]
+# Update this to match your renamed script
+py-modules = ["khuzdul"]
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["test"]
