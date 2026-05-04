@@ -9,7 +9,7 @@ description = "A strict, zero-abstraction two-pass x86-64 assembler"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "mihinN"}
+    { name = "mihinN", email = "39882449+mihinN@users.noreply.github.com",}
 ]
 
 [project.optional-dependencies]
