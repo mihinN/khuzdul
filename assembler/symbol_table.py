@@ -167,6 +167,8 @@ def _estimate_instr_size(instr: IRInstructions) -> int:
 
     if m in _FIXED_SIZE:
         return _FIXED_SIZE[m]
+    if m == "INT":
+        return 2
 
     # control flow with label
     if m in {"JMP", "CALL"}:
