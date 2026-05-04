@@ -1,8 +1,19 @@
-# Khuzdul
+<div align="center">
 
-*/koozdul/*
+<img src="banner/khuz.png" alt="sif" width="600">
 
-![alt text](./banner/khuz.png)
+<br><br>
+
+[![license](https://img.shields.io/badge/license-BSD--3--Clause-blue?style=flat-square)](LICENSE)
+
+**[install](#install) · [usage](#usage) · [modules](#modules) · [docs](docs/) · [contribute](#contribute)**
+
+</div>
+
+---
+
+
+# What is Khuzdul */koozdul/* ? 
 
 Khuzdul is an educational, two-pass x86-64 assembler written in pure Python. It translates x86-64 assembly source into raw flat machine-code binaries (`.bin`) - no ELF, no PE, just bytes.
 
