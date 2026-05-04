@@ -1,5 +1,7 @@
 name: Khuzdul CD
 
+permissions:
+  contents: write
 # Trigger ONLY when you push a tag that starts with 'v' (e.g., v0.1.0-alpha)
 on:
   push:
