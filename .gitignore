@@ -23,6 +23,6 @@ venv/
 *.swp
 
 Note.txt
-./docs
+docs/
 
 
