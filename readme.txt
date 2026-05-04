@@ -1,1 +1,4 @@
-SASM - Sophisticated x86 Assembler
+Khuzdul 
+/* koozdul */ 
+
+khuzdul is a x86_64 

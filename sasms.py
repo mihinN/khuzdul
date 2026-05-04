@@ -76,11 +76,11 @@ def main():
 
         print(f"[+] Success! Wrote {len(machine_code)} bytes to '{args.output}'")
 
-    # Catch your custom assembler errors to print a clean error message
+    # Catch custom assembler errors to print a clean error message
     except AssemblerError as e:
         print(f"\n[-] Assembly Failed:\n{e}", file=sys.stderr)
         sys.exit(1)
-    # Catch raw Python errors (e.g., file permissions)
+    # Catch raw Python errors
     except Exception as e:
         print(f"\n[-] Unexpected Error: {e}", file=sys.stderr)
         sys.exit(1)
