@@ -3,10 +3,10 @@
 class Instructions:
 
     GPA_OPS = {
-        "ADD":     [b"\x00", b"\x01", b"\x03", b"\x04", b"\x05", b"\x80", b"\x81", b"\x83"],
+        "ADD":     [b"\x00", b"\x01", b"\x02", b"\x03", b"\x04", b"\x05", b"\x80", b"\x81", b"\x83"],
             # add with carry
         "ADC":     [b"\x10", b"\x11", b"\x12", b"\x13", b"\x14", b"\x15", b"\x80", b"\x81", b"\x83"],
-        "SUB":     [b"\x29", b"\x2B", b"\x2D", b"\x81", b"\x83"],
+        "SUB":     [b"\x28", b"\x29", b"\x2B", b"\x2C", b"\x2D", b"\x81", b"\x83"],
             # substract with borrow
         "SUBB":    [b"\x81", b"\x83"],
         "MUL":     [b"\xF7", b"\x69", b"\x6B", b"\x0F\xAF"],
@@ -15,19 +15,26 @@ class Instructions:
         "NEG":     [b"\xF7"],
         "AND":     [b"\x20", b"\x21", b"\x22", b"\x23", b"\x25", b"\x80", b"\x81", b"\x83"],
         "OR":      [b"\x08", b"\x09", b"\x0B", b"\x0D", b"\x80", b"\x81", b"\x83"],
-        "XOR":     [b"\x30", b"\x31", b"\x32", b"\x80", b"\x81", b"\x83"],
+        "XOR":     [b"\x30", b"\x31", b"\x32", b"\x33", b"\x35", b"\x80", b"\x81", b"\x83"],
         "NOT":     [b"\xF6", b"\xF7"],
         "TEST":    [b"\x84", b"\x85", b"\xA9", b"\xF6", b"\xF7"],
-        "CMP":     [b"\x38", b"\x3D", b"\x80", b"\x81", b"\x83"],
+        "CMP":     [b"\x38", b"\x39", b"\x3A", b"\x3B", b"\x3C", b"\x3D", b"\x80", b"\x81", b"\x83"],
     }
 
     # Data Transfer
     DATA_T = {
-        "MOV":            [b"\x89", b"\x8A", b"\x8B", b"\x8C", b"\x8E", b"\xA0", b"\xA1", b"\xA2", b"\xA3", b"\xC7"],
+        "MOV":            [b"\x89", b"\x8A", b"\x8B", b"\x8C", b"\x8E", b"\xA0", b"\xA1", b"\xA2", b"\xA3", b"\xC6", b"\xC7",
+                           b"\xA4", b"\xA5",
+                           b"\xB0", b"\xB1", b"\xB2", b"\xB3", b"\xB4", b"\xB5", b"\xB6", b"\xB7",
+                           b"\xB8", b"\xB9", b"\xBA", b"\xBB", b"\xBC", b"\xBD", b"\xBE", b"\xBF"],
+        "MOVSX":          [b"\x0F\xBE", b"\x0F\xBF"],
+        "MOVZX":          [b"\x0F\xB6", b"\x0F\xB7"],
         "MOVBE":          [b"\x0F\x38\xF0", b"\x0F\x38\xF1"],
         "MOVD/MOVQ":      [b"\x0F\x6E", b"\x0F\x7E", b"\x0F\x6F", b"\x0F\x7F"],
-        "PUSH":           [b"\x50", b"\x51", b"\x52", b"\x53", b"\x54", b"\x55", b"\x56", b"\x57", b"\x68", b"\x6A", b"\xFF"],
-        "POP":            [b"\x58", b"\x59", b"\x5A", b"\x5B", b"\x5C", b"\x5D", b"\x5E", b"\x5F", b"\x8F"],
+        "PUSH":           [b"\x50", b"\x51", b"\x52", b"\x53", b"\x54", b"\x55", b"\x56", b"\x57", b"\x68", b"\x6A", b"\xFF",
+                           b"\x06", b"\x0E", b"\x16", b"\x1E"],
+        "POP":            [b"\x58", b"\x59", b"\x5A", b"\x5B", b"\x5C", b"\x5D", b"\x5E", b"\x5F", b"\x8F",
+                           b"\x07", b"\x17", b"\x1F"],
         "PUSHA/PUSHAD":   [b"\x60"],
         "PUSHF/POPF":     [b"\x9C", b"\x9D"],
         "CMPXCHG":        [b"\x0F\xB0", b"\x0F\xB1"],

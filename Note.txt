@@ -361,12 +361,20 @@ intpo any address.
 in normal if we load into wrong one , it gets the segfaults and crash
 
 kernel loads at random address -> shellcode inject via bufferoverflow or something 
--> shellcode address = unknown at writetime
+-> shellcode address = unknown at writetimedouble 
 MUST be position independent code to work 
 
 - basically getting shell using trusted process by the Operating system 
 - changing protection bits
 
 
+
+Problem that cause in near jmp and short jmp ? 
+
+- also we called this back patching , relaxation (jump relaxation) , 
+Span dependent instructions , still this is single pass compiler , thats why this happend 
+nasm like compilers are Multipass compilers , it reads the code once and find all labes and 
+second time calculate the best size for every jump and third time ectually emit the bytes . 
+this is how nasm get short byte length 
 
 
