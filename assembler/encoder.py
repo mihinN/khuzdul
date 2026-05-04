@@ -318,6 +318,19 @@ def _encode_syscall(_instr, _sym) -> bytes:
     return b"\x0F\x05"
 
 
+def _encode_int(instr: IRInstructions, sym: SymbolTable) -> bytes:
+    """encode INT imm8 (CD xx)"""
+    op = instr.operands[0]
+    result = EncodedInstructions()
+    
+    if op.op_type == OperandType.IMMEDIATE:
+        result.opcode = b"\xCD"
+        result.immediate = encode_immediate(op.value, 1)
+    else:
+        raise EncoderError(f"[line {instr.line}] INT expects an immediate 8-bit operand")
+        
+    return result.to_bytes()
+
 def _encode_push(instr: IRInstructions, sym: SymbolTable) -> bytes:
     op     = instr.operands[0]
     result = EncodedInstructions()
