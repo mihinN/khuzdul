@@ -30,7 +30,7 @@ We take the security of our compiler pipeline seriously. If you discover a vulne
 Instead, please report the vulnerability using one of the following methods:
 
 1. **GitHub Security Advisories:** Navigate to the "Security" tab of this repository and click "Report a vulnerability" to open a private advisory draft.
-2. **Email:** Send a detailed report directly to [39882449+mihinN@users.noreply.github.com].
+2. **Email:** Send a detailed report directly to [this](39882449+mihinN@users.noreply.github.com).
 
 ### What to include in your report:
 * A descriptive summary of the vulnerability.
