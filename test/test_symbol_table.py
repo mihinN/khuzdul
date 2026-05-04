@@ -208,7 +208,15 @@ class TestInstructionSizeEstimation:
         source = "_start:\n    syscall\nend:\n"
         sym = build(source)
         assert sym.symbols["END"].offset == 2
+    def test_jmp_label_is_5_bytes(self):
+        source = "_start:\n    jmp loop\nend:\nloop:\n"
+        sym = build(source)
+        assert sym.symbols["END"].offset == 5
 
+    def test_call_is_5_bytes(self):
+        source = "_start:\n    call func\nend:\nfunc:\n"
+        sym = build(source)
+        assert sym.symbols["END"].offset == 5
     def test_jmp_label_is_6_bytes(self):
         source = "_start:\n    jmp loop\nend:\nloop:\n"
         sym = build(source)
