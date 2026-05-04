@@ -2,6 +2,8 @@
 
 */koozdul/*
 
+![alt text](./banner/khuz.png)
+
 Khuzdul is an educational, two-pass x86-64 assembler written in pure Python. It translates x86-64 assembly source into raw flat machine-code binaries (`.bin`) - no ELF, no PE, just bytes.
 
 Where mainstream assemblers like NASM and GAS focus on producing object files for the system linker, Khuzdul is built for **security research, reverse engineering, and shellcode development**. The IR layer carries shellcode-aware metadata (bad-character filtering, PIC verification, encoding preferences) as first-class concerns rather than afterthoughts.
