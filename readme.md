@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="banner/khuz.png" alt="sif" width="600">
+<img src="banner/khuz.png" alt="khuz" width="600">
 
 <br><br>
 
