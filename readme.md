@@ -45,7 +45,7 @@ source.asm -> Lexer -> Parser -> IR  -> SymbolTable -> Encoder ->  out.bin
 ## Usage
 
 ```bash
-python -m assembler hello.asm -o hello.bin
+python3 ./khuz.py test.asm
 ```
 
 Example program:
