@@ -96,7 +96,4 @@ BSD 3-Clause License. See [LICENSE](LICENSE) for the full text.
 
 Built as a learning project. The pipeline (lex → parse → IR → resolve → encode) is textbook, the design decisions inside each stage are mine.
 
-This project stands on the work of engineers who designed x86, built the first assemblers and linkers, and figured it all out from scratch, no Stack Overflow, no AI, just patience and a 500-page manual.
-To everyone who left knowledge behind: thank you.
-
 "If I have seen further, it is by standing on the shoulders of giants."- Isaac Newton
